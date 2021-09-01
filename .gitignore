@@ -1,0 +1,8 @@
+# Vim's .swp files
+.*.swp
+
+# Compiled Python bytecode
+__pycache__
+
+# Database files
+data/aggreg8.sqlite

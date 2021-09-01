@@ -1,0 +1,11 @@
+HEAD http://feeds.bbci.co.uk/news/rss.xml
+Server: Apache/2.4.6 (CentOS) OpenSSL/1.0.2k-fips
+Content-Type: text/xml; charset=utf-8
+X-Content-Type-Options: nosniff
+Content-Encoding: gzip
+Content-Length: 6187
+Cache-Control: max-age=165
+Date: Sat, 21 Aug 2021 20:32:29 GMT
+Connection: keep-alive
+Vary: Accept-Encoding
+Timing-Allow-Origin: https://www.bbc.co.uk, https://www.bbc.com

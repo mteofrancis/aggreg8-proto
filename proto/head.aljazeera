@@ -1,0 +1,18 @@
+HEAD https://www.aljazeera.com/xml/rss/all.xml
+Server: nginx
+Content-Type: application/rss+xml; charset=UTF-8
+Content-Length: 4133
+Last-Modified: Sat, 21 Aug 2021 20:22:35 GMT
+X-hacker: If you're reading this, you should visit wpvip.com/careers and apply to join the fun, mention this header.
+X-Powered-By: WordPress VIP <https://wpvip.com>
+Host-Header: a9130478a60e5f9135f765b23f26593b
+Link: <https://wordpress.aljazeera.com/wp-json/>; rel="https://api.w.org/"
+X-rq: lhr4 0 4 9980
+Cache-Control: max-age=300, must-revalidate
+ETag: W/"60a990ce84be6d042ba401b57a347158"
+Content-Encoding: gzip
+Accept-Ranges: bytes
+Date: Sat, 21 Aug 2021 20:32:19 GMT
+Connection: keep-alive
+Vary: Accept-Encoding
+Strict-Transport-Security: max-age=15768000

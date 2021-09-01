@@ -1,0 +1,102 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+##
+# aggreg8.git:bin/a8
+##
+
+## {{{ ---- [ Header ] -----------------------------------------------------------------------------
+
+##
+# Copyright (c) 2021 Francis M <francism@destinatech.com>
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License version 2.0 as published by the
+# Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to:
+#
+#   Free Software Foundation
+#   51 Franklin Street, Fifth Floor
+#   Boston, MA 02110
+#   USA
+##
+
+## }}} ---- [ Header ] -----------------------------------------------------------------------------
+
+import os
+import sys
+
+# Path to aggreg8 instance directory
+INSTANCE_DIR = os.path.abspath(os.path.dirname(__file__) + '/..')
+
+sys.path.append(INSTANCE_DIR)
+
+from aggreg8 import *
+
+## {{{ class A8Main
+
+class A8Main(A8Base):
+
+  ## {{{ A8Main.main()
+  def main(self, argv=sys.argv):
+    opts, args = self.parse_argv()
+
+    for opt in opts:
+      if opt in ['-h', '--help']:
+        self.usage()
+      elif opt in ['-v', '--verbose']:
+        self.verbose += 1
+      elif opt in ['-q', '--quiet']:
+        self.verbose = 0
+        self.quiet = True
+      else:
+        die(f"'{opt}' is not an recognised option")
+
+    if len(args) < 1:
+      die(f"command argument missing, see '{PROG_NAME} --help' for usage instructions")
+      exit(1)
+
+    command = args.pop(0)
+    argv0 = os.path.abspath(__file__) + f'-{command}'
+    new_argv = [argv0] + args
+
+    os.environ['A8_INSTANCE_DIR'] = INSTANCE_DIR
+    os.environ['A8_COMMAND'] = command
+
+    try:
+      os.execv(argv0, new_argv)
+    except OSError as ex:
+      die(f"{argv0}: execv() failed: {ex}")
+  ## }}}
+
+  ## {{{ A8Main.usage()
+  def usage(self, short=False):
+    perr(f'Usage: {PROG_NAME} [options] <command> [command options [command arguments]]\n')
+
+    if not short:
+      perr('Options:\n')
+      perr('  -h, --help     Print usage instructions')
+      perr('  -v, --verbose  Print information messages to console')
+      perr('  -q, --quiet    Print only warnings/errors to console (default)')
+
+    exit(1)
+  ## }}}
+
+## clas A8Main }}}
+
+if __name__ == '__main__':
+  try:
+    exit(A8Main().main())
+  except KeyboardInterrupt:
+    pass
+
+##
+# vim: ts=2 sw=2 tw=100 et fdm=marker :
+##

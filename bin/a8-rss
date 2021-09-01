@@ -1,0 +1,346 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+##
+# aggreg8.git:bin/a8-rss
+##
+
+## {{{ ---- [ Header ] -----------------------------------------------------------------------------
+
+##
+# Copyright (c) 2021 Francis M <francism@destinatech.com>
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License version 2.0 as published by the
+# Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to:
+#
+#   Free Software Foundation
+#   51 Franklin Street, Fifth Floor
+#   Boston, MA 02110
+#   USA
+##
+
+## }}} ---- [ Header ] -----------------------------------------------------------------------------
+
+import os
+import sys
+
+import json
+
+# Path to aggreg8 instance directory
+INSTANCE_DIR = os.path.abspath(os.path.dirname(__file__) + '/..')
+
+sys.path.append(INSTANCE_DIR)
+
+from aggreg8 import *
+
+from aggreg8.config import check_config
+
+from aggreg8.database import factory, SqlStatement
+
+from aggreg8.url import UrlRequest
+
+import aggreg8.rss as rss
+
+import config
+
+## {{{ class A8Rss
+
+class A8Rss(A8Base):
+
+  # Database driver object implementing aggreg8.database.Database
+  dbd = None
+
+  # List of valid sub-commands
+  commands = None
+
+  ## {{{ A8Rss.__init__()
+  def __init__(self, argv=sys.argv):
+    super().__init__(argv)
+    self.commands = ['add', 'remove', 'list', 'poll']
+  ## }}}
+
+  ## {{{ A8Rss.main()
+  def main(self, argv=sys.argv):
+    # Parse options/arguments nice and early so we can get early
+    # debug/warning/error messages
+    #
+    opts, args = self.parse_argv()
+
+    for opt in opts:
+      if opt in ['-h', '--help']:
+        self.usage()
+      elif opt in ['-v', '--verbose']:
+        self.verbose += 1
+      elif opt in ['-q', '--quiet']:
+        self.verbose = 0
+        self.quiet = True
+      else:
+        die(f"'{opt}' is not an recognised option")
+
+    # We need at least one sub-command argument
+    if len(args) < 1:
+      die("sub-command argument required")
+
+    command = args.pop(0)
+    if command not in self.commands:
+      die(f"invalid sub-command '{command}'")
+
+    # Ensure the various A8_* environment variables have been set
+    self.check_env()
+
+    # Verify settings in loeaded config module
+    check_config(config)
+
+    # SQLite only for now...
+    if config.A8_DATABASE_DRIVER != 'sqlite':
+      die(f"support for databases other than SQLite doesn't yet exist")
+
+    # Initialise database driver and connect to/open the respective server/file
+    self.dbd = factory(config.A8_DATABASE_DRIVER)
+    self.dbd.connect(config.A8_SQLITE_DATABASE)
+
+    if command == 'add':
+      self.cmd_add(opts, args)
+    elif command == 'list':
+      self.cmd_list(opts, args)
+    elif command == 'poll':
+      self.cmd_poll(opts, args)
+    else:
+      die_internal(f"support for command '{command}' non-existent")
+
+  ## }}}
+
+  ## {{{ A8Rss.cmd_add()
+  def cmd_add(self, opts, args):
+    # We need exactly 3 arguments
+    if len(args) != 3:
+      die(f"3 arguments required but only {len(args)} were given")
+
+    name = args[0]
+    proper_name = args[1]
+    url = args[2]
+    feed = None
+
+    try:
+      feed = rss.RssFeed(name, proper_name, url)
+    except rss.RssFeedError as ex:
+      die(f"RssFeed contructor failed: {ex}")
+
+    feed.insert(self.dbd)
+  ## }}}
+
+  ## {{{ A8Rss.cmd_remove()
+  def cmd_remove(self, opts, args):
+    # We need exactly 1 argument
+    if len(args) != 3:
+      die(f"1 argument required but {len(args)} were given")
+
+    feed_name = args[0]
+
+    if not rss.valid_feed_name(feed_name):
+      die(f"invalid feed name '{feed_name}'")
+
+    try:
+      rss.remove_feed(feed_name)
+    except A8Error as ex:
+      die(f"failed to add feed '{feed_name}': {ex}")
+  ## }}}
+
+  ## {{{ A8Rss.cmd_list()
+  def cmd_list(self, opts, args):
+    # We accept no arguments
+    if len(args) != 0:
+      die(f"list command does not accept argument")
+
+    feeds = rss.RssFeed.feeds(self.dbd)
+    if len(feeds) < 1:
+      perr("No RSS feeds defined")
+      exit(0)
+
+    n = 0
+    for feed in feeds:
+      n += 1
+      if n > 1:
+        pout('')
+
+      name, proper_name, url = feed.get('name'), feed.get('proper_name'), feed.get('url')
+      pout(f'[{proper_name}]')
+      pout(f'Name: {name}')
+      pout(f'URL: {url}')
+  ## }}}
+
+  ## {{{ A8Rss.cmd_poll()
+  def cmd_poll(self, opts, args):
+    # We accept no arguments
+    if len(args) != 0:
+      die(f"poll command does not accept argument")
+
+    feeds = rss.RssFeed.feeds(self.dbd)
+    if len(feeds) < 1:
+      perr("No RSS feeds to poll")
+
+    for feed in feeds:
+      self.poll(feed)
+  ## }}}
+
+  def fetch(self, feed):
+    headers = {'Accept-Encoding': 'gzip, deflate'}
+    response = UrlRequest(feed.get('url'), headers=headers)
+
+    #debug(f"feed '{feed.get('name')}' returned HTTP status code {response.status}")
+    if response.status != 200:
+      return
+
+    ## Columns:
+    #
+    # 0 = id
+    # 1 = feed_id
+    # 2 = url
+    # 3 = date_added
+    # 4 = last_updated
+    # 5 = content
+    # 6 = content_hash
+    #
+
+    cursor = self.dbd.cursor()
+    columns = 'feed_id, url, date_added, last_updated, content, content_hash'
+
+    sql = SqlStatement(
+      'INSERT INTO',
+      'rss_feed_cache',
+      f'({columns})',
+      'VALUES(?, ?, ?, ?, ?, ?)'
+    )
+
+    now = time_now()
+    values = (
+      feed.get('id'),
+      feed.get('url'),
+      now,
+      now,
+      response.content,
+      f'{response.content_hash_alg}:{response.content_hash}',
+    )
+
+    #debug(f"executing: {sql}")
+    cursor.execute(str(sql), values)
+
+    sql = SqlStatement(
+      'UPDATE',
+      'rss_feeds',
+      'SET',
+      'last_updated=?',
+      'WHERE',
+      'id=?'
+    )
+
+    values = (now, feed.get('id'))
+
+    #debug(f"executing: {sql}")
+    cursor.execute(str(sql), values)
+
+    sql = SqlStatement(
+      'UPDATE',
+      'rss_feeds',
+      'SET',
+      'entries=?',
+      'WHERE',
+      'id=?'
+    )
+
+    values = (
+      json.dumps(rss.parse(response.content), indent=4, sort_keys=True),
+      feed.get('id')
+    )
+
+    #debug(f"executing: {sql}")
+    cursor.execute(str(sql), values)
+
+    self.dbd.commit()
+
+  def poll(self, feed):
+    cursor = self.dbd.cursor()
+
+    sql = SqlStatement(
+      'SELECT',
+      '*',
+      'FROM',
+      'rss_feed_cache',
+      'WHERE',
+      'feed_id=?'
+    )
+
+    #debug(f"executing: {sql}")
+
+    id_str = str(feed.get('id'))
+    row = tuple(cursor.execute(str(sql), id_str))
+
+    if row:
+      # Cached: check if it's expired and download feed again if it is
+      #debug(f"feed '{feed.get('name')}' is cached, checking expiry")
+
+      diff = time_diff(time_now(), feed.get('last_updated'))
+      update_interval = feed.get('update_interval')
+      #debug(f"update_interval = {update_interval}")
+
+      if diff < feed.get('update_interval'):
+        #debug(f"cached feed has not yet expired (last updated: {diff} seconds ago)")
+        return
+
+      # Delete cached feed and then fetch() again
+      #
+
+      sql = SqlStatement(
+        'DELETE',
+        'FROM',
+        'rss_feed_cache',
+        'WHERE',
+        'feed_id=?'
+      )
+
+      #debug(f"executing: {sql}")
+      cursor.execute(str(sql), id_str)
+
+      self.dbd.commit()
+
+      #debug(f"cached feed has expired, fetching it again")
+      self.fetch(feed)
+      return
+
+    # Not cached: download feed for the first time
+    #debug(f"feed '{feed.get('name')}' isn't cached, attempting to fetch it")
+    self.fetch(feed)
+
+  ## {{{ A8Rss.usage()
+  def usage(self, short=False):
+    perr(f'Usage: {PROG_NAME} [options]')
+
+    if not short:
+      perr('\nOptions:\n')
+      perr('  -h, --help     Print usage instructions')
+      perr('  -v, --verbose  Print information messages to console')
+      perr('  -q, --quiet    Print only warnings/errors to console (default)')
+
+    exit(1)
+  ## }}}
+
+## clas A8Rss }}}
+
+if __name__ == '__main__':
+  try:
+    exit(A8Rss().main())
+  except KeyboardInterrupt:
+    pass
+
+##
+# vim: ts=2 sw=2 tw=100 et fdm=marker :
+##

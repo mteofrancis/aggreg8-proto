@@ -1,0 +1,145 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+##
+# aggreg8.git:bin/a8-init
+##
+
+## {{{ ---- [ Header ] -----------------------------------------------------------------------------
+
+##
+# Copyright (c) 2021 Francis M <francism@destinatech.com>
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License version 2.0 as published by the
+# Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to:
+#
+#   Free Software Foundation
+#   51 Franklin Street, Fifth Floor
+#   Boston, MA 02110
+#   USA
+##
+
+## }}} ---- [ Header ] -----------------------------------------------------------------------------
+
+import os
+import sys
+
+# Path to aggreg8 instance directory
+INSTANCE_DIR = os.path.abspath(os.path.dirname(__file__) + '/..')
+
+sys.path.append(INSTANCE_DIR)
+
+from aggreg8 import *
+
+from aggreg8.config import check_config
+
+from aggreg8.database import factory
+
+import config
+
+## {{{ class A8Init
+
+class A8Init(A8Base):
+
+  # -f/--force option
+  force = None
+
+  # Database driver object implementing aggreg8.database.Database
+  dbd = None
+
+  ## {{{ A8Init.__init__()
+  def __init__(self, argv=sys.argv):
+    super().__init__(argv)
+    self.force = False
+  ## }}}
+
+  ## {{{ A8Init.main()
+  def main(self, argv=sys.argv):
+    # Parse options/arguments nice and early so we can get early
+    # debug/warning/error messages
+    #
+    opts, args = self.parse_argv()
+
+    for opt in opts:
+      if opt in ['-h', '--help']:
+        self.usage()
+      elif opt in ['-v', '--verbose']:
+        self.verbose += 1
+      elif opt in ['-q', '--quiet']:
+        self.verbose = 0
+        self.quiet = True
+      elif opt in ['-f', '--force']:
+        self.force = True
+      else:
+        die(f"'{opt}' is not an recognised option")
+
+    # Ensure the various A8_* environment variables have been set
+    self.check_env()
+
+    # Verify settings in loeaded config module
+    check_config(config)
+
+    # SQLite only for now...
+    if config.A8_DATABASE_DRIVER != 'sqlite':
+      die(f"support for databases other than SQLite doesn't yet exist")
+
+    # Check the size of the database file: if it's not zero, require -f/--force
+    # to perform re-initialisation
+    #
+    try:
+      st = os.stat(config.A8_SQLITE_DATABASE)
+      if st.st_size != 0:
+        if not self.force:
+          die(f"{config.A8_SQLITE_DATABASE}: file exists, use -f/--force to overwrite")
+
+        # Truncate database file
+        #debug(f"{config.A8_SQLITE_DATABASE}: truncating file")
+        fd = os.open(config.A8_SQLITE_DATABASE, os.O_RDWR)
+        os.truncate(fd, 0)
+        os.close(fd)
+    except FileNotFoundError:
+      pass
+
+    # Initialise database driver and connect to/open the respective server/file
+    self.dbd = factory(config.A8_DATABASE_DRIVER)
+    self.dbd.connect(config.A8_SQLITE_DATABASE)
+
+    # Initialise database
+    with open(f'{config.A8_DATA_DIR}/init.sql') as fp:
+      self.dbd.executescript(fp.read())
+  ## }}}
+
+  ## {{{ A8Init.usage()
+  def usage(self, short=False):
+    perr(f'Usage: {PROG_NAME} [options]')
+
+    if not short:
+      perr('\nOptions:\n')
+      perr('  -f, --force    Force (re-)initialisation if database file exists\n')
+      perr('  -h, --help     Print usage instructions')
+      perr('  -v, --verbose  Print information messages to console')
+      perr('  -q, --quiet    Print only warnings/errors to console (default)')
+
+    exit(1)
+  ## }}}
+
+## clas A8Init }}}
+
+if __name__ == '__main__':
+  try:
+    exit(A8Init().main())
+  except KeyboardInterrupt:
+    pass
+
+##
+# vim: ts=2 sw=2 tw=100 et fdm=marker :
+##
